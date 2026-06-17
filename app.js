@@ -585,7 +585,7 @@
     wizRenderProfessions("");
   });
 
-  // Step 1: Profession selection
+  // Step 1: Profession selection with event delegation
   function wizRenderProfessions(query) {
     const container = $("#wiz-professions");
     const results = Professions.search(query);
@@ -609,19 +609,25 @@
       html = '<p class="muted" style="text-align:center;padding:20px">No trades found. Try a different search.</p>';
     }
     container.innerHTML = html;
-    // Attach click handlers
-    $$(".wiz-prof", container).forEach(btn => {
-      btn.addEventListener("click", () => {
-        $$(".wiz-prof", container).forEach(b => b.classList.remove("is-selected"));
-        btn.classList.add("is-selected");
-        wizProfession = Professions.getById(btn.dataset.profId);
-        $("#wiz-next-1").disabled = false;
-      });
-    });
   }
 
+  // Event delegation on #wiz-professions container (avoids re-registering listeners)
+  $("#wiz-professions").addEventListener("click", function(e) {
+    const btn = e.target.closest(".wiz-prof");
+    if (!btn) return;
+    $$(".wiz-prof", this).forEach(b => b.classList.remove("is-selected"));
+    btn.classList.add("is-selected");
+    wizProfession = Professions.getById(btn.dataset.profId);
+    $("#wiz-next-1").disabled = false;
+  });
+
+  // Debounced search input handler (150ms)
+  let wizSearchTimer = null;
   $("#wiz-search").addEventListener("input", (e) => {
-    wizRenderProfessions(e.target.value.trim());
+    clearTimeout(wizSearchTimer);
+    wizSearchTimer = setTimeout(() => {
+      wizRenderProfessions(e.target.value.trim());
+    }, 150);
   });
 
   $("#wiz-back-1").addEventListener("click", () => wizGoTo(0));
@@ -636,11 +642,25 @@
     const container = $("#wiz-questions");
     $("#wiz-trade-label").textContent = wizProfession.name + " pricing";
     const questions = wizProfession.questions || [];
+    // Determine unit system based on country selection
+    const country = $("#wiz-country").value;
+    const useImperial = (country === "US");
     let html = '<div class="card">';
     questions.forEach((q, i) => {
+      // Convert unit labels for US users
+      let unitLabel = q.unit || '';
+      if (useImperial) {
+        unitLabel = unitLabel
+          .replace(/per m2/gi, "per sq ft")
+          .replace(/per m²/gi, "per sq ft")
+          .replace(/\/m2/gi, "/sq ft")
+          .replace(/\/m²/gi, "/sq ft")
+          .replace(/per m\b/gi, "per ft")
+          .replace(/\/m\b/gi, "/ft");
+      }
       if (q.type === "select") {
         const opts = (q.options || []).map(o => '<option value="' + escapeHtml(o) + '"' + (o === String(q.default) ? ' selected' : '') + '>' + escapeHtml(o) + '</option>').join("");
-        html += '<label class="field"><span>' + escapeHtml(q.label) + '</span><div class="wiz-field-unit"><select data-qkey="' + q.key + '">' + opts + '</select><span class="unit-label">' + escapeHtml(q.unit || '') + '</span></div></label>';
+        html += '<label class="field"><span>' + escapeHtml(q.label) + '</span><div class="wiz-field-unit"><select data-qkey="' + q.key + '">' + opts + '</select><span class="unit-label">' + escapeHtml(unitLabel) + '</span></div></label>';
       } else if (q.type === "toggle") {
         const checked = q.default ? " checked" : "";
         html += '<label class="field field--row"><span>' + escapeHtml(q.label) + '</span><input type="checkbox" class="switch" data-qkey="' + q.key + '"' + checked + ' /></label>';
@@ -648,8 +668,8 @@
         // number or text
         const inputType = q.type === "number" ? "number" : "text";
         const inputMode = q.type === "number" ? ' inputmode="decimal" step="0.01"' : '';
-        const val = q.default != null ? ' value="' + q.default + '"' : '';
-        html += '<label class="field"><span>' + escapeHtml(q.label) + '</span><div class="wiz-field-unit"><input type="' + inputType + '"' + inputMode + ' data-qkey="' + q.key + '"' + val + ' /><span class="unit-label">' + escapeHtml(q.unit || '') + '</span></div></label>';
+        const val = q.default != null ? ' value="' + escapeHtml(String(q.default)) + '"' : '';
+        html += '<label class="field"><span>' + escapeHtml(q.label) + '</span><div class="wiz-field-unit"><input type="' + inputType + '"' + inputMode + ' data-qkey="' + q.key + '"' + val + ' /><span class="unit-label">' + escapeHtml(unitLabel) + '</span></div></label>';
       }
     });
     html += '</div>';
@@ -697,7 +717,9 @@
     newSettings.business = { name: bizName, phone: bizPhone, email: bizEmail };
     newSettings.vatEnabled = vatEnabled;
     newSettings.vatRate = vatRate;
-    newSettings.tradePricing = tradePricing;
+    // Overwrite tradePricing entirely to clear stale keys from a previous profession
+    newSettings.tradePricing = {};
+    Object.keys(tradePricing).forEach(function(k) { newSettings.tradePricing[k] = tradePricing[k]; });
 
     // If profession is carpet-fitter, map trade pricing to the engine's carpet price structure
     if (wizProfession.id === "carpet-fitter") {
