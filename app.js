@@ -135,6 +135,25 @@
   }
   function stripTags(s) { return s.replace(/<[^>]+>/g, ""); }
 
+  // tappable quick-reply chips inside the chat
+  let quickEl = null;
+  function clearQuick() { if (quickEl) { quickEl.remove(); quickEl = null; } }
+  function showQuick(options) {
+    clearQuick();
+    const row = document.createElement("div");
+    row.className = "quick-replies";
+    options.forEach(o => {
+      const b = document.createElement("button");
+      b.className = "quick";
+      b.textContent = o.label;
+      b.addEventListener("click", () => handleUserText(o.value != null ? o.value : o.label));
+      row.appendChild(b);
+    });
+    chat.appendChild(row);
+    chat.scrollTop = chat.scrollHeight;
+    quickEl = row;
+  }
+
   function jobCardBubble(job) {
     const rows = job.rooms.map(r => {
       let val;
@@ -159,9 +178,12 @@
   let current = null;
   let retries = 0;
 
+  const EXAMPLE_SENTENCE = "Living room four point two by three point eight, hallway one by four, stairs and landing thirteen steps, mid range carpet, uplift the old carpet";
+
   function startCapture() {
     show("capture");
     chat.innerHTML = "";
+    clearQuick();
     job = null; mode = "await_job"; queue = []; current = null; retries = 0;
     $("#capture-build").disabled = true;
     $("#capture-input").value = "";
@@ -169,7 +191,27 @@
       botSay("Heads up — set your prices in Settings first so quotes are accurate.", true);
     }
     botSay("Right, let's quote a job. Tell me the rooms and sizes, and which carpet.");
-    // first input is via a user tap (home mic already gave a gesture if used)
+    botSay(sttSupported
+      ? "Tap the mic to talk, or type below. You can also tap an example."
+      : "Type your job below, or tap an example to see how it works.", true);
+    showQuick([{ label: "✨ Try an example", value: "__example__" }]);
+  }
+
+  // One-tap full demo quote (proves it works without any typing/voice)
+  function runExampleQuote() {
+    show("capture");
+    chat.innerHTML = "";
+    clearQuick();
+    job = Parser.parse(EXAMPLE_SENTENCE);
+    job.customer = "Sample Customer";
+    if (!job.carpetTier) job.carpetTier = "mid";
+    mode = "done"; current = null;
+    bubble(escapeHtml("“" + EXAMPLE_SENTENCE + "”"), "me");
+    jobCardBubble(job);
+    botSay("Here's the finished quote.", true);
+    const q = Engine.buildQuote(job, settings);
+    currentQuote = q;
+    setTimeout(() => { renderQuote(q); show("quote"); }, 600);
   }
 
   // Home hero mic: navigate + listen immediately (uses the tap gesture)
@@ -177,6 +219,8 @@
     startCapture();
     setTimeout(() => startListening(handleUserText), 350);
   });
+  $("#home-type").addEventListener("click", () => startCapture());
+  $("#home-example").addEventListener("click", runExampleQuote);
 
   // composer controls
   $("#capture-mic").addEventListener("click", () => {
@@ -195,15 +239,19 @@
 
   function handleUserText(text) {
     stopListening();
+    clearQuick();
+    if (text === "__example__") text = EXAMPLE_SENTENCE;
     bubble(escapeHtml(text), "me");
 
     if (mode === "await_job") {
       job = Parser.parse(text);
       if (!job.rooms.length) {
         botSay("I didn't catch any rooms there. Try: living room four by three, stairs thirteen steps.");
+        showQuick([{ label: "✨ Try an example", value: "__example__" }]);
         return;
       }
       jobCardBubble(job);
+      $("#capture-build").disabled = false;
       buildQueue();
       askNext();
       return;
@@ -252,11 +300,17 @@
     mode = "await_answer";
     botSay(current.q);
     armReply();
+    // tappable options where it makes sense
+    if (current.kind === "tier") {
+      showQuick([{ label: "Budget" }, { label: "Mid-range" }, { label: "Premium" }]);
+    } else if (current.kind === "customer") {
+      showQuick([{ label: "Skip", value: "skip" }]);
+    }
   }
 
-  // visually arm the mic (don't auto-start to stay reliable across browsers)
+  // keep Build tappable once we have a job to quote
   function armReply() {
-    $("#capture-build").disabled = (queue.length > 0 || current);
+    $("#capture-build").disabled = !(job && job.rooms.length);
   }
 
   function applyAnswer(c, text) {
@@ -289,6 +343,7 @@
 
   function finalize() {
     mode = "done"; current = null;
+    clearQuick();
     $("#capture-build").disabled = true;
     // any rooms still missing sizes? give them a tiny default & warn, so a quote always builds
     let warned = false;
