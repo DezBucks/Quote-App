@@ -7,12 +7,13 @@
 
   const $ = (sel, root = document) => root.querySelector(sel);
   const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
-  const { Engine, Parser } = window;
+  const { Engine, Parser, Professions } = window;
 
   let settings = Engine.loadSettings();
 
   /* ---------------- navigation ---------------- */
   const screens = {
+    wizard: $("#screen-wizard"),
     home: $("#screen-home"),
     capture: $("#screen-capture"),
     quote: $("#screen-quote"),
@@ -23,6 +24,9 @@
   function show(name) {
     Object.entries(screens).forEach(([k, el]) => { el.hidden = (k !== name); });
     document.body.classList.toggle("has-bottom-bar", bottomBarScreens.has(name));
+    // Hide tabbar on wizard screen
+    const tabbar = $("#tabbar");
+    if (tabbar) tabbar.style.display = (name === "wizard") ? "none" : "";
     $$(".tab").forEach(t => t.classList.toggle("is-active", t.dataset.go === name));
     if (name === "home") renderRecent();
     if (name === "settings") fillSettingsForm();
@@ -552,8 +556,196 @@
     return s;
   }
 
+  /* ============================================================
+     SETUP WIZARD
+     ============================================================ */
+  let wizStep = 0;
+  let wizProfession = null;
+  const wizSteps = $$(".wiz-step");
+  const wizDots = $$(".wiz-dot");
+
+  function wizGoTo(step) {
+    const prev = wizStep;
+    wizStep = step;
+    wizSteps.forEach((el, i) => {
+      el.classList.remove("is-active", "is-left");
+      if (i === step) el.classList.add("is-active");
+      else if (i < step) el.classList.add("is-left");
+    });
+    wizDots.forEach((d, i) => {
+      d.classList.remove("is-active", "is-done");
+      if (i === step) d.classList.add("is-active");
+      else if (i < step) d.classList.add("is-done");
+    });
+  }
+
+  // Step 0 -> 1: Get Started
+  $("#wiz-start").addEventListener("click", () => {
+    wizGoTo(1);
+    wizRenderProfessions("");
+  });
+
+  // Step 1: Profession selection
+  function wizRenderProfessions(query) {
+    const container = $("#wiz-professions");
+    const results = Professions.search(query);
+    // Group by category
+    const grouped = {};
+    results.forEach(p => {
+      if (!grouped[p.category]) grouped[p.category] = [];
+      grouped[p.category].push(p);
+    });
+    const cats = Object.keys(grouped).sort();
+    let html = "";
+    cats.forEach(cat => {
+      html += '<div class="wiz-cat"><div class="wiz-cat__title">' + escapeHtml(cat) + '</div><div class="wiz-cat__list">';
+      grouped[cat].forEach(p => {
+        const sel = wizProfession && wizProfession.id === p.id ? " is-selected" : "";
+        html += '<button type="button" class="wiz-prof' + sel + '" data-prof-id="' + p.id + '">' + escapeHtml(p.name) + '</button>';
+      });
+      html += '</div></div>';
+    });
+    if (!results.length) {
+      html = '<p class="muted" style="text-align:center;padding:20px">No trades found. Try a different search.</p>';
+    }
+    container.innerHTML = html;
+    // Attach click handlers
+    $$(".wiz-prof", container).forEach(btn => {
+      btn.addEventListener("click", () => {
+        $$(".wiz-prof", container).forEach(b => b.classList.remove("is-selected"));
+        btn.classList.add("is-selected");
+        wizProfession = Professions.getById(btn.dataset.profId);
+        $("#wiz-next-1").disabled = false;
+      });
+    });
+  }
+
+  $("#wiz-search").addEventListener("input", (e) => {
+    wizRenderProfessions(e.target.value.trim());
+  });
+
+  $("#wiz-back-1").addEventListener("click", () => wizGoTo(0));
+  $("#wiz-next-1").addEventListener("click", () => {
+    if (!wizProfession) return;
+    wizGoTo(2);
+    wizRenderQuestions();
+  });
+
+  // Step 2: Trade-specific questions
+  function wizRenderQuestions() {
+    const container = $("#wiz-questions");
+    $("#wiz-trade-label").textContent = wizProfession.name + " pricing";
+    const questions = wizProfession.questions || [];
+    let html = '<div class="card">';
+    questions.forEach((q, i) => {
+      if (q.type === "select") {
+        const opts = (q.options || []).map(o => '<option value="' + escapeHtml(o) + '"' + (o === String(q.default) ? ' selected' : '') + '>' + escapeHtml(o) + '</option>').join("");
+        html += '<label class="field"><span>' + escapeHtml(q.label) + '</span><div class="wiz-field-unit"><select data-qkey="' + q.key + '">' + opts + '</select><span class="unit-label">' + escapeHtml(q.unit || '') + '</span></div></label>';
+      } else if (q.type === "toggle") {
+        const checked = q.default ? " checked" : "";
+        html += '<label class="field field--row"><span>' + escapeHtml(q.label) + '</span><input type="checkbox" class="switch" data-qkey="' + q.key + '"' + checked + ' /></label>';
+      } else {
+        // number or text
+        const inputType = q.type === "number" ? "number" : "text";
+        const inputMode = q.type === "number" ? ' inputmode="decimal" step="0.01"' : '';
+        const val = q.default != null ? ' value="' + q.default + '"' : '';
+        html += '<label class="field"><span>' + escapeHtml(q.label) + '</span><div class="wiz-field-unit"><input type="' + inputType + '"' + inputMode + ' data-qkey="' + q.key + '"' + val + ' /><span class="unit-label">' + escapeHtml(q.unit || '') + '</span></div></label>';
+      }
+    });
+    html += '</div>';
+    container.innerHTML = html;
+  }
+
+  $("#wiz-back-2").addEventListener("click", () => wizGoTo(1));
+  $("#wiz-next-2").addEventListener("click", () => wizGoTo(3));
+
+  // Step 3: Business details
+  $("#wiz-back-3").addEventListener("click", () => wizGoTo(2));
+  $("#wiz-next-3").addEventListener("click", () => {
+    wizComplete();
+  });
+
+  // Completion
+  function wizComplete() {
+    // Gather trade pricing answers
+    const tradePricing = {};
+    $$("[data-qkey]", $("#wiz-questions")).forEach(el => {
+      const key = el.dataset.qkey;
+      if (el.type === "checkbox") {
+        tradePricing[key] = el.checked;
+      } else if (el.type === "number") {
+        tradePricing[key] = parseFloat(el.value) || 0;
+      } else {
+        tradePricing[key] = el.value;
+      }
+    });
+
+    // Gather business details
+    const country = $("#wiz-country").value;
+    const bizName = $("#wiz-biz-name").value.trim();
+    const bizPhone = $("#wiz-biz-phone").value.trim();
+    const bizEmail = $("#wiz-biz-email").value.trim();
+    const vatEnabled = $("#wiz-vat-enabled").checked;
+    const vatRate = parseFloat($("#wiz-vat-rate").value) || 20;
+    const markup = parseFloat($("#wiz-markup").value) || 0;
+
+    // Build settings object
+    const newSettings = Engine.loadSettings();
+    newSettings.profession = wizProfession.id;
+    newSettings.country = country;
+    newSettings.markup = markup;
+    newSettings.business = { name: bizName, phone: bizPhone, email: bizEmail };
+    newSettings.vatEnabled = vatEnabled;
+    newSettings.vatRate = vatRate;
+    newSettings.tradePricing = tradePricing;
+
+    // If profession is carpet-fitter, map trade pricing to the engine's carpet price structure
+    if (wizProfession.id === "carpet-fitter") {
+      if (tradePricing.carpet_budget_m2) newSettings.prices.carpet.budget = tradePricing.carpet_budget_m2;
+      if (tradePricing.carpet_mid_m2) newSettings.prices.carpet.mid = tradePricing.carpet_mid_m2;
+      if (tradePricing.carpet_premium_m2) newSettings.prices.carpet.premium = tradePricing.carpet_premium_m2;
+      if (tradePricing.underlay_m2) newSettings.prices.underlay = tradePricing.underlay_m2;
+      if (tradePricing.gripper_m) newSettings.prices.gripper = tradePricing.gripper_m;
+      if (tradePricing.door_bar) newSettings.prices.doorBar = tradePricing.door_bar;
+      if (tradePricing.uplift_m2) newSettings.prices.uplift = tradePricing.uplift_m2;
+      if (tradePricing.fitting_m2) newSettings.prices.labour = tradePricing.fitting_m2;
+      if (tradePricing.stairs_step) newSettings.prices.stairPerStep = tradePricing.stairs_step;
+    }
+
+    Engine.saveSettings(newSettings);
+    settings = newSettings;
+    localStorage.setItem("cq_wizard_done", "true");
+    localStorage.setItem("cq_profession", wizProfession.id);
+
+    // Show summary
+    const currSymbol = country === "US" ? "$" : country === "AU" || country === "NZ" || country === "CA" ? "$" : "\u00a3";
+    $("#wiz-summary").textContent = wizProfession.name + " - " + Object.keys(tradePricing).length + " prices configured. Currency: " + currSymbol + ". " + (vatEnabled ? "VAT at " + vatRate + "%." : "No VAT.");
+
+    wizGoTo(4);
+  }
+
+  // Step 4: Start Quoting
+  $("#wiz-finish").addEventListener("click", () => {
+    show("home");
+  });
+
+  // Re-run wizard from settings
+  $("#settings-rerun-wizard").addEventListener("click", () => {
+    wizStep = 0;
+    wizProfession = null;
+    wizGoTo(0);
+    $("#wiz-search").value = "";
+    $("#wiz-next-1").disabled = true;
+    show("wizard");
+  });
+
   /* ---------------- boot ---------------- */
-  show("home");
+  if (localStorage.getItem("cq_wizard_done") !== "true") {
+    show("wizard");
+    wizRenderProfessions("");
+  } else {
+    show("home");
+  }
   // warm up voices on first interaction (some browsers need it)
   document.addEventListener("click", function warm() {
     pickVoice();

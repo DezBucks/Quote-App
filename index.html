@@ -19,6 +19,107 @@
 <body>
   <div id="app">
 
+    <!-- ================= WIZARD ================= -->
+    <section class="screen" id="screen-wizard" data-screen="wizard" hidden>
+      <div class="wizard">
+        <div class="wizard__progress">
+          <span class="wiz-dot is-active" data-step="0"></span>
+          <span class="wiz-dot" data-step="1"></span>
+          <span class="wiz-dot" data-step="2"></span>
+          <span class="wiz-dot" data-step="3"></span>
+          <span class="wiz-dot" data-step="4"></span>
+        </div>
+
+        <div class="wizard__track">
+          <!-- Step 0: Welcome -->
+          <div class="wiz-step is-active" data-wiz="0">
+            <div class="wiz-welcome">
+              <div class="wiz-welcome__logo">
+                <span class="brand__logo brand__logo--big">QM</span>
+              </div>
+              <h1 class="wiz-welcome__title">Welcome to QuoteMate</h1>
+              <p class="wiz-welcome__sub">Let us set up your pricing in 2 minutes. We will ask about your trade, typical prices, and business info so every quote is accurate from the start.</p>
+              <button class="btn btn--primary wiz-btn" id="wiz-start">Get Started</button>
+            </div>
+          </div>
+
+          <!-- Step 1: Profession Selection -->
+          <div class="wiz-step" data-wiz="1">
+            <h2 class="wiz-heading">What is your trade?</h2>
+            <div class="wiz-search-wrap">
+              <input type="text" id="wiz-search" class="wiz-search" placeholder="Search your trade..." autocomplete="off" />
+            </div>
+            <div class="wiz-professions" id="wiz-professions">
+              <!-- filled by JS -->
+            </div>
+            <div class="wiz-nav">
+              <button class="btn btn--ghost wiz-btn" id="wiz-back-1">Back</button>
+              <button class="btn btn--primary wiz-btn" id="wiz-next-1" disabled>Next</button>
+            </div>
+          </div>
+
+          <!-- Step 2: Trade-Specific Questions -->
+          <div class="wiz-step" data-wiz="2">
+            <h2 class="wiz-heading">Your pricing</h2>
+            <p class="wiz-subheading" id="wiz-trade-label">Set your typical prices and rates</p>
+            <div class="wiz-questions" id="wiz-questions">
+              <!-- filled by JS -->
+            </div>
+            <div class="wiz-nav">
+              <button class="btn btn--ghost wiz-btn" id="wiz-back-2">Back</button>
+              <button class="btn btn--primary wiz-btn" id="wiz-next-2">Next</button>
+            </div>
+          </div>
+
+          <!-- Step 3: Business Details -->
+          <div class="wiz-step" data-wiz="3">
+            <h2 class="wiz-heading">Business details</h2>
+            <p class="wiz-subheading">These appear on your quotes</p>
+            <div class="wiz-form">
+              <div class="card">
+                <label class="field"><span>Country</span>
+                  <select id="wiz-country">
+                    <option value="GB">United Kingdom</option>
+                    <option value="US">United States</option>
+                    <option value="AU">Australia</option>
+                    <option value="NZ">New Zealand</option>
+                    <option value="IE">Ireland</option>
+                    <option value="CA">Canada</option>
+                  </select>
+                </label>
+                <label class="field"><span>Business name</span><input id="wiz-biz-name" type="text" placeholder="e.g. Dave's Carpets" /></label>
+                <label class="field"><span>Phone</span><input id="wiz-biz-phone" type="tel" placeholder="07..." /></label>
+                <label class="field"><span>Email</span><input id="wiz-biz-email" type="email" placeholder="you@email.com" /></label>
+              </div>
+              <div class="card">
+                <h3 class="card__title">Tax &amp; markup</h3>
+                <label class="field field--row">
+                  <span>Apply VAT / sales tax</span>
+                  <input id="wiz-vat-enabled" type="checkbox" class="switch" />
+                </label>
+                <label class="field"><span>VAT rate (%)</span><input id="wiz-vat-rate" type="number" step="1" inputmode="numeric" value="20" /></label>
+                <label class="field"><span>Default markup (%)</span><input id="wiz-markup" type="number" step="1" inputmode="numeric" value="0" /></label>
+              </div>
+            </div>
+            <div class="wiz-nav">
+              <button class="btn btn--ghost wiz-btn" id="wiz-back-3">Back</button>
+              <button class="btn btn--primary wiz-btn" id="wiz-next-3">Finish setup</button>
+            </div>
+          </div>
+
+          <!-- Step 4: Completion -->
+          <div class="wiz-step" data-wiz="4">
+            <div class="wiz-complete">
+              <div class="wiz-complete__icon">&#10003;</div>
+              <h1 class="wiz-complete__title">You are all set!</h1>
+              <p class="wiz-complete__sub" id="wiz-summary">Your pricing is configured and ready to go.</p>
+              <button class="btn btn--primary wiz-btn" id="wiz-finish">Start Quoting</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
     <!-- ================= HOME ================= -->
     <section class="screen" id="screen-home" data-screen="home">
       <header class="nav nav--large">
@@ -155,6 +256,12 @@
             <label class="field"><span>VAT rate (%)</span><input name="vatRate" type="number" step="1" inputmode="numeric" /></label>
           </div>
           <p class="muted small">Everything is stored on this device only.</p>
+          <div class="card" style="margin-top:8px">
+            <button type="button" class="field field--row" id="settings-rerun-wizard" style="border:none;background:none;width:100%;cursor:pointer;padding:14px 2px">
+              <span style="color:var(--accent);font-weight:600">Re-run setup wizard</span>
+              <span style="color:var(--muted)">&#8250;</span>
+            </button>
+          </div>
         </form>
       </main>
     </section>
@@ -170,6 +277,7 @@
     <div id="toast" class="toast" hidden></div>
   </div>
 
+  <script src="professions.js"></script>
   <script src="engine.js"></script>
   <script src="parser.js"></script>
   <script src="app.js"></script>

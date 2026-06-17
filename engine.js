@@ -8,6 +8,9 @@
 
   // ---- defaults (fitter can change all of these in Settings) ----
   const DEFAULT_SETTINGS = {
+    profession: "",
+    country: "GB",
+    markup: 0,
     business: { name: "", phone: "", email: "" },
     rollWidth: 4,      // metres (broadloom roll width)
     wastePct: 10,      // trim allowance added to ordered carpet length
@@ -21,7 +24,8 @@
       uplift: 3.0,       // £/m² (uplift + disposal of old carpet)
       labour: 5.0,       // £/m² fitting
       stairPerStep: 25.0 // £/step (carpet + fitting bundled)
-    }
+    },
+    tradePricing: {}   // profession-specific pricing from wizard
   };
 
   function deepClone(o) { return JSON.parse(JSON.stringify(o)); }
