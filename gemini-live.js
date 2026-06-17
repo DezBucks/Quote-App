@@ -40,20 +40,23 @@
   const INPUT_SAMPLE_RATE = 16000;
   const OUTPUT_SAMPLE_RATE = 24000;
   const BUFFER_SIZE = 4096;
-  const ENDPOINT = "wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent";
+
+  /* Worker URL - configurable via Settings. The app connects to the Cloudflare Worker
+     which proxies to Gemini's API with the secret key stored server-side. */
+  const DEFAULT_WORKER_URL = "wss://quotemate-proxy.YOUR-SUBDOMAIN.workers.dev";
 
   /* ==========================================================
      PUBLIC API
      ========================================================== */
 
   /**
-   * Connect to Gemini Live API.
-   * @param {string} apiKey - Gemini API key
+   * Connect to Gemini Live API via the Cloudflare Worker proxy.
+   * @param {string} workerUrl - WebSocket URL of the Cloudflare Worker proxy
    * @param {string} systemPrompt - Dynamic system instruction text
    * @returns {Promise<void>} resolves when setup is acknowledged
    */
-  function connect(apiKey, systemPrompt) {
-    lastApiKey = apiKey;
+  function connect(workerUrl, systemPrompt) {
+    lastApiKey = workerUrl;
     lastSystemPrompt = systemPrompt;
 
     return new Promise(function (resolve, reject) {
@@ -62,7 +65,8 @@
       fireState("connecting");
       setupAcked = false;
 
-      var url = ENDPOINT + "?key=" + encodeURIComponent(apiKey);
+      // Connect to the worker proxy (which holds the API key server-side)
+      var url = workerUrl;
       ws = new WebSocket(url);
 
       ws.onopen = function () {
@@ -102,10 +106,9 @@
       };
 
       ws.onerror = function (err) {
-        var msg = "WebSocket error connecting to Gemini";
-        // Check for auth/key issues (code 401/403 typically cause immediate close)
+        var msg = "WebSocket error connecting to Gemini proxy";
         if (!setupAcked) {
-          msg = "Connection failed - check your API key";
+          msg = "Connection failed - check your Worker URL in Settings";
         }
         if (onError) onError(msg);
         reject(new Error(msg));
@@ -118,9 +121,9 @@
         clearTimeouts();
 
         if (!setupAcked) {
-          // Connection failed before setup - could be invalid key
+          // Connection failed before setup
           var errMsg = event.code === 1008 || event.code === 4003 || event.code === 403
-            ? "Invalid API key"
+            ? "Worker rejected connection - check API key is configured on the worker"
             : "Connection closed before setup completed (code: " + event.code + ")";
           fireState("disconnected");
           reject(new Error(errMsg));

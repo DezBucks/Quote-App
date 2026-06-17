@@ -184,8 +184,8 @@
 
   function startGeminiSession() {
     if (geminiSessionActive) return;
-    const apiKey = localStorage.getItem("cq_gemini_key");
-    if (!apiKey) { startListening(handleUserText); return; }
+    const workerUrl = localStorage.getItem("cq_worker_url");
+    if (!workerUrl) { startListening(handleUserText); return; }
 
     geminiSessionActive = true;
     const micBtn = $("#capture-mic");
@@ -211,8 +211,8 @@
 
     GeminiLive.onError = function (msg) {
       toast(msg);
-      // If it looks like an API key issue, update the status and fall back
-      if (/api key|invalid|auth/i.test(msg)) {
+      // If it looks like a connection/config issue, update the status and fall back
+      if (/worker|url|api key|invalid|auth/i.test(msg)) {
         statusEl.textContent = "Connection failed - using basic voice";
         statusEl.classList.add("status--error");
         statusEl.classList.remove("status--connected");
@@ -260,7 +260,7 @@
       stopGeminiSession();
     };
 
-    GeminiLive.connect(apiKey, systemPrompt)
+    GeminiLive.connect(workerUrl, systemPrompt)
       .then(function () {
         // Show intro help message
         botSay("Connected to AI assistant. Speak naturally about the job - rooms, sizes, carpet type. I will build your quote when I have everything.", true);
@@ -271,11 +271,11 @@
       })
       .catch(function (err) {
         var errMsg = err.message || "Unknown error";
-        // Check if API key issue
-        if (/api key|invalid|auth|closed before setup/i.test(errMsg)) {
+        // Check if connection/worker issue
+        if (/worker|url|api key|invalid|auth|closed before setup/i.test(errMsg)) {
           statusEl.textContent = "Connection failed - using basic voice";
           statusEl.classList.add("status--error");
-          toast("AI connection failed. Check your API key in Settings.");
+          toast("AI connection failed. Check your Worker URL in Settings.");
         } else {
           statusEl.textContent = "Connection failed - using basic voice";
           statusEl.classList.add("status--error");
@@ -423,8 +423,8 @@
   // Home hero mic: navigate + listen immediately (uses the tap gesture)
   $("#home-mic").addEventListener("click", () => {
     startCapture();
-    const geminiKey = localStorage.getItem("cq_gemini_key");
-    if (geminiKey) {
+    const workerUrl = localStorage.getItem("cq_worker_url");
+    if (workerUrl) {
       setTimeout(() => startGeminiSession(), 350);
     } else {
       setTimeout(() => startListening(handleUserText), 350);
@@ -437,8 +437,8 @@
   $("#capture-mic").addEventListener("click", () => {
     if (geminiSessionActive) { stopGeminiSession(); return; }
     if (listening) { stopListening(); return; }
-    const geminiKey = localStorage.getItem("cq_gemini_key");
-    if (geminiKey) { startGeminiSession(); return; }
+    const workerUrl = localStorage.getItem("cq_worker_url");
+    if (workerUrl) { startGeminiSession(); return; }
     startListening(handleUserText);
   });
   $("#capture-send").addEventListener("click", sendTyped);
@@ -708,7 +708,7 @@
     form.business.value = s.business.name || "";
     form.phone.value = s.business.phone || "";
     form.email.value = s.business.email || "";
-    form.gemini_key.value = localStorage.getItem("cq_gemini_key") || "";
+    form.worker_url.value = localStorage.getItem("cq_worker_url") || "";
     form.carpet_budget.value = s.prices.carpet.budget;
     form.carpet_mid.value = s.prices.carpet.mid;
     form.carpet_premium.value = s.prices.carpet.premium;
@@ -725,7 +725,7 @@
   }
   function num(v, d) { const n = parseFloat(v); return isNaN(n) ? d : n; }
   $("#settings-save").addEventListener("click", () => {
-    localStorage.setItem("cq_gemini_key", form.gemini_key.value.trim());
+    localStorage.setItem("cq_worker_url", form.worker_url.value.trim());
     settings = {
       business: { name: form.business.value.trim(), phone: form.phone.value.trim(), email: form.email.value.trim() },
       rollWidth: num(form.rollWidth.value, 4),

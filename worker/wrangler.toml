@@ -1,0 +1,10 @@
+name = "quotemate-proxy"
+main = "worker.js"
+compatibility_date = "2024-01-01"
+
+# The GEMINI_API_KEY is stored as a secret, not here.
+# Run: npx wrangler secret put GEMINI_API_KEY
+# Then paste your key when prompted.
+
+[vars]
+# No plain-text variables needed; the API key is a secret.
