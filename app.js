@@ -122,6 +122,120 @@
   function stopListening() { try { recog && recog.stop(); } catch (e) {} setListening(false); }
 
   /* ============================================================
+     GEMINI LIVE SESSION
+     ============================================================ */
+  const GeminiLive = window.GeminiLive;
+  let geminiSessionActive = false;
+
+  function buildGeminiSystemPrompt() {
+    const profession = localStorage.getItem("cq_profession") || settings.profession || "tradesperson";
+    const tradePricing = settings.tradePricing || {};
+    const prices = settings.prices || {};
+
+    let prompt = "You are a friendly, professional quoting assistant for a " + profession + ". ";
+    prompt += "You help the user describe a job by asking natural follow-up questions in conversation. ";
+    prompt += "Speak in a clear, concise British English style. Be warm but efficient.\n\n";
+
+    prompt += "The user's saved price list:\n";
+    prompt += JSON.stringify({ tradePricing: tradePricing, prices: prices }, null, 2) + "\n\n";
+
+    prompt += "Your task:\n";
+    prompt += "1. Ask about each room or area that needs work (name, dimensions in metres: length and width)\n";
+    prompt += "2. Ask about stairs if applicable (number of steps)\n";
+    prompt += "3. Ask which carpet tier they want: budget, mid, or premium\n";
+    prompt += "4. Ask if old carpet needs uplifting (uplift: true/false per room)\n";
+    prompt += "5. Ask how many door bars are needed per room\n";
+    prompt += "6. Ask for the customer name for the quote\n";
+    prompt += "7. When you have ALL the information, confirm it back to the user, then output a JSON block.\n\n";
+
+    prompt += "IMPORTANT: When all job details are gathered, return structured JSON wrapped in triple backticks like this:\n";
+    prompt += "```json\n";
+    prompt += '{\n  "rooms": [\n    {"type": "room", "name": "Living Room", "length": 4.2, "width": 3.8, "uplift": false, "doors": 1},\n';
+    prompt += '    {"type": "stairs", "name": "Stairs", "steps": 13, "uplift": false, "doors": 0}\n  ],\n';
+    prompt += '  "carpetTier": "mid",\n  "customer": "John Smith"\n}\n';
+    prompt += "```\n\n";
+    prompt += "Rules for the JSON:\n";
+    prompt += "- rooms is an array. Each room has: type ('room' or 'stairs'), name (string), length (number, metres), width (number, metres), steps (number, for stairs only), uplift (boolean), doors (number)\n";
+    prompt += "- carpetTier is one of: 'budget', 'mid', 'premium'\n";
+    prompt += "- customer is the customer name string\n";
+    prompt += "- Only output the JSON block once you have confirmed all details with the user\n";
+
+    return prompt;
+  }
+
+  function startGeminiSession() {
+    if (geminiSessionActive) return;
+    const apiKey = localStorage.getItem("cq_gemini_key");
+    if (!apiKey) { startListening(handleUserText); return; }
+
+    geminiSessionActive = true;
+    const micBtn = $("#capture-mic");
+    micBtn.classList.add("is-live", "gemini-active");
+    bubble("AI voice active - speak naturally", "bot");
+
+    const systemPrompt = buildGeminiSystemPrompt();
+
+    GeminiLive.onStateChange = function (state) {
+      if (state === "disconnected" && geminiSessionActive) {
+        stopGeminiSession();
+      }
+    };
+
+    GeminiLive.onError = function (msg) {
+      bubble("Connection error: " + escapeHtml(msg), "bot");
+      stopGeminiSession();
+    };
+
+    GeminiLive.onTextResponse = function (text) {
+      // We can optionally show partial text in a bubble
+    };
+
+    GeminiLive.onJobComplete = function (jobData) {
+      // Gemini has returned the structured job JSON
+      job = jobData;
+      // Ensure defaults
+      if (!job.carpetTier) job.carpetTier = "mid";
+      job.rooms = (job.rooms || []).map(function (r) {
+        return {
+          type: r.type || "room",
+          name: r.name || "Room",
+          length: r.length || 0,
+          width: r.width || 0,
+          steps: r.steps || null,
+          uplift: !!r.uplift,
+          doors: r.doors || 0
+        };
+      });
+      jobCardBubble(job);
+      $("#capture-build").disabled = false;
+      mode = "done";
+      bubble("Job details captured. Tap Build to generate your quote.", "bot");
+      stopGeminiSession();
+    };
+
+    GeminiLive.connect(apiKey, systemPrompt)
+      .then(function () {
+        return GeminiLive.startStreaming();
+      })
+      .then(function () {
+        // Streaming started successfully
+      })
+      .catch(function (err) {
+        bubble("Could not start AI voice: " + escapeHtml(err.message || "Unknown error"), "bot");
+        stopGeminiSession();
+      });
+  }
+
+  function stopGeminiSession() {
+    if (!geminiSessionActive) return;
+    geminiSessionActive = false;
+    GeminiLive.disconnect();
+    const micBtn = $("#capture-mic");
+    micBtn.classList.remove("is-live", "gemini-active");
+    bubble("AI voice ended", "bot");
+  }
+
+  /* ============================================================
      CHAT UI helpers
      ============================================================ */
   const chat = $("#chat");
@@ -221,14 +335,22 @@
   // Home hero mic: navigate + listen immediately (uses the tap gesture)
   $("#home-mic").addEventListener("click", () => {
     startCapture();
-    setTimeout(() => startListening(handleUserText), 350);
+    const geminiKey = localStorage.getItem("cq_gemini_key");
+    if (geminiKey) {
+      setTimeout(() => startGeminiSession(), 350);
+    } else {
+      setTimeout(() => startListening(handleUserText), 350);
+    }
   });
   $("#home-type").addEventListener("click", () => startCapture());
   $("#home-example").addEventListener("click", runExampleQuote);
 
   // composer controls
   $("#capture-mic").addEventListener("click", () => {
+    if (geminiSessionActive) { stopGeminiSession(); return; }
     if (listening) { stopListening(); return; }
+    const geminiKey = localStorage.getItem("cq_gemini_key");
+    if (geminiKey) { startGeminiSession(); return; }
     startListening(handleUserText);
   });
   $("#capture-send").addEventListener("click", sendTyped);
@@ -498,6 +620,7 @@
     form.business.value = s.business.name || "";
     form.phone.value = s.business.phone || "";
     form.email.value = s.business.email || "";
+    form.gemini_key.value = localStorage.getItem("cq_gemini_key") || "";
     form.carpet_budget.value = s.prices.carpet.budget;
     form.carpet_mid.value = s.prices.carpet.mid;
     form.carpet_premium.value = s.prices.carpet.premium;
@@ -514,6 +637,7 @@
   }
   function num(v, d) { const n = parseFloat(v); return isNaN(n) ? d : n; }
   $("#settings-save").addEventListener("click", () => {
+    localStorage.setItem("cq_gemini_key", form.gemini_key.value.trim());
     settings = {
       business: { name: form.business.value.trim(), phone: form.phone.value.trim(), email: form.email.value.trim() },
       rollWidth: num(form.rollWidth.value, 4),

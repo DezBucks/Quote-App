@@ -224,6 +224,12 @@
           </div>
 
           <div class="card">
+            <h3 class="card__title">AI Voice (Gemini)</h3>
+            <label class="field"><span>Gemini API Key</span><input name="gemini_key" type="password" placeholder="Paste your API key..." /></label>
+            <p class="muted small" style="margin:4px 2px 8px">Optional. Enables AI voice conversation. Key is stored on this device only.</p>
+          </div>
+
+          <div class="card">
             <h3 class="card__title">Carpet (£ per m²)</h3>
             <label class="field"><span>Budget range</span><input name="carpet_budget" type="number" step="0.01" inputmode="decimal" /></label>
             <label class="field"><span>Mid range</span><input name="carpet_mid" type="number" step="0.01" inputmode="decimal" /></label>
@@ -280,6 +286,7 @@
   <script src="professions.js" defer></script>
   <script src="engine.js" defer></script>
   <script src="parser.js" defer></script>
+  <script src="gemini-live.js" defer></script>
   <script src="app.js" defer></script>
 </body>
 </html>

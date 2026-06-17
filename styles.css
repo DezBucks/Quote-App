@@ -156,10 +156,24 @@ body {
 .mic-btn, .send-btn {
   width: 44px; height: 44px; border-radius: 50%; border: none; flex: none;
   font-size: 19px; display: grid; place-items: center; color: #fff;
+  position: relative;
 }
 .mic-btn { background: var(--bg-elev); border: 1px solid var(--line); }
 .mic-btn.is-live { background: var(--danger); animation: micpulse 1s infinite; }
 @keyframes micpulse { 0%,100%{ box-shadow: 0 0 0 0 rgba(255,93,108,.5);} 50%{ box-shadow: 0 0 0 10px rgba(255,93,108,0);} }
+
+/* Gemini AI active state */
+.mic-btn.gemini-active { background: var(--accent-2); animation: geminipulse 1.2s infinite; }
+.mic-btn.gemini-active::after {
+  content: "AI";
+  position: absolute;
+  top: -6px; right: -6px;
+  font-size: 9px; font-weight: 800;
+  background: var(--accent); color: #04111f;
+  border-radius: 6px; padding: 2px 4px;
+  line-height: 1;
+}
+@keyframes geminipulse { 0%,100%{ box-shadow: 0 0 0 0 rgba(34,211,166,.5);} 50%{ box-shadow: 0 0 0 12px rgba(34,211,166,0);} }
 .send-btn { background: linear-gradient(135deg, var(--accent), var(--accent-2)); color: #04111f; }
 
 /* ---------- quote doc ---------- */
