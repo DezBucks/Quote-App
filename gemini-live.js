@@ -23,7 +23,6 @@
   let lastSystemPrompt = null;
   let responseTimer = null;
   let thinkingTimer = null;
-  let userStoppedSpeaking = false;
 
   var MAX_RETRIES = 3;
   var THINKING_TIMEOUT = 15000;  // 15 seconds
@@ -72,11 +71,11 @@
           setup: {
             model: "models/gemini-2.0-flash-live-001",
             generationConfig: {
-              response_modalities: ["AUDIO"],
+              response_modalities: ["AUDIO", "TEXT"],
               speech_config: {
                 voice_config: {
                   prebuilt_voice_config: {
-                    voice_name: "Kore"
+                    voice_name: "Puck"
                   }
                 }
               }
@@ -169,14 +168,14 @@
   }
 
   /**
-   * Reset and start the response timeout timers.
+   * Reset the response timeout timers (called when we receive data from the model).
    */
   function resetResponseTimeout() {
-    clearTimeouts();
+    clearResponseTimeouts();
   }
 
   function startResponseTimeout() {
-    clearTimeouts();
+    clearResponseTimeouts();
     thinkingTimer = setTimeout(function () {
       if (onThinking) onThinking();
     }, THINKING_TIMEOUT);
@@ -187,9 +186,20 @@
     }, DISCONNECT_TIMEOUT);
   }
 
-  function clearTimeouts() {
+  /**
+   * Clear only the response-related timers (thinking + disconnect).
+   * Does NOT touch retryTimer so reconnection attempts are not cancelled.
+   */
+  function clearResponseTimeouts() {
     if (thinkingTimer) { clearTimeout(thinkingTimer); thinkingTimer = null; }
     if (responseTimer) { clearTimeout(responseTimer); responseTimer = null; }
+  }
+
+  /**
+   * Clear all timers including retry (used on explicit disconnect).
+   */
+  function clearTimeouts() {
+    clearResponseTimeouts();
     if (retryTimer) { clearTimeout(retryTimer); retryTimer = null; }
   }
 
@@ -204,6 +214,13 @@
       try { ws.close(); } catch (e) {}
       ws = null;
     }
+    // Close playback AudioContext to avoid iOS limit exhaustion
+    if (playbackCtx) {
+      try { playbackCtx.close(); } catch (e) {}
+      playbackCtx = null;
+    }
+    playbackQueue = [];
+    isPlaying = false;
     connected = false;
     setupAcked = false;
     fireState("disconnected");
@@ -241,8 +258,6 @@
             }
           };
           ws.send(JSON.stringify(msg));
-          // Start response timeout as user is sending audio
-          startResponseTimeout();
         };
 
         sourceNode.connect(scriptNode);
@@ -252,9 +267,11 @@
   }
 
   /**
-   * Stop mic capture.
+   * Stop mic capture. Starts the response timeout since the user has
+   * finished sending audio and we now expect a model reply.
    */
   function stopStreaming() {
+    var wasStreaming = streaming;
     streaming = false;
     if (scriptNode) {
       try { scriptNode.disconnect(); } catch (e) {}
@@ -271,6 +288,11 @@
     if (micStream) {
       micStream.getTracks().forEach(function (t) { t.stop(); });
       micStream = null;
+    }
+    // If we were actively streaming and are still connected, start
+    // the response timeout (we expect Gemini to reply now).
+    if (wasStreaming && connected) {
+      startResponseTimeout();
     }
   }
 
@@ -299,7 +321,7 @@
 
     // Turn complete - process accumulated text
     if (sc.turnComplete) {
-      clearTimeouts();
+      clearResponseTimeouts();
       if (pendingText) {
         // Fire turn complete callback with the full accumulated text
         if (onTurnComplete) onTurnComplete(pendingText);
@@ -318,7 +340,7 @@
     mt.parts.forEach(function (part) {
       // Audio part - play it
       if (part.inlineData && part.inlineData.data) {
-        clearTimeouts(); // We are receiving audio, so no timeout needed
+        clearResponseTimeouts(); // We are receiving audio, so no timeout needed
         playAudioChunk(part.inlineData.data, part.inlineData.mimeType || "audio/pcm;rate=24000");
       }
       // Text part - accumulate

@@ -132,21 +132,29 @@
     const tradePricing = settings.tradePricing || {};
     const prices = settings.prices || {};
 
-    let prompt = "You are a friendly, professional quoting assistant for a " + profession + ". ";
+    // Look up the profession display name from Professions catalogue if available
+    let professionName = profession;
+    if (window.Professions && Professions.getById) {
+      const profObj = Professions.getById(profession);
+      if (profObj && profObj.name) professionName = profObj.name;
+    }
+
+    let prompt = "You are a friendly, professional quoting assistant for a " + professionName + ". ";
     prompt += "You help the user describe a job by asking natural follow-up questions in conversation. ";
     prompt += "Speak in a clear, concise British English style. Be warm but efficient.\n\n";
 
+    prompt += "The user's trade is: " + professionName + "\n";
     prompt += "The user's saved price list:\n";
     prompt += JSON.stringify({ tradePricing: tradePricing, prices: prices }, null, 2) + "\n\n";
 
     prompt += "Your task:\n";
-    prompt += "1. Ask about each room or area that needs work (name, dimensions in metres: length and width)\n";
-    prompt += "2. Ask about stairs if applicable (number of steps)\n";
-    prompt += "3. Ask which carpet tier they want: budget, mid, or premium\n";
-    prompt += "4. Ask if old carpet needs uplifting (uplift: true/false per room)\n";
-    prompt += "5. Ask how many door bars are needed per room\n";
-    prompt += "6. Ask for the customer name for the quote\n";
-    prompt += "7. When you have ALL the information, confirm it back to the user, then output a JSON block.\n\n";
+    prompt += "1. Ask about each room, area, or zone that needs work (name, relevant dimensions or quantities)\n";
+    prompt += "2. Ask follow-up questions that are relevant to the user's trade (" + professionName + "). ";
+    prompt += "For example, a carpet fitter needs room dimensions, carpet tier, and whether old carpet needs removing. ";
+    prompt += "A plumber needs fixture types, pipe runs, and access details. An electrician needs circuit counts, socket positions, etc.\n";
+    prompt += "3. Ask for any material grade/tier choices relevant to the trade (e.g. budget, mid-range, premium)\n";
+    prompt += "4. Ask for the customer name for the quote\n";
+    prompt += "5. When you have ALL the information needed to price the job, confirm it back to the user, then output a JSON block.\n\n";
 
     prompt += "IMPORTANT: When all job details are gathered, return structured JSON wrapped in triple backticks like this:\n";
     prompt += "```json\n";
@@ -155,10 +163,12 @@
     prompt += '  "carpetTier": "mid",\n  "customer": "John Smith"\n}\n';
     prompt += "```\n\n";
     prompt += "Rules for the JSON:\n";
-    prompt += "- rooms is an array. Each room has: type ('room' or 'stairs'), name (string), length (number, metres), width (number, metres), steps (number, for stairs only), uplift (boolean), doors (number)\n";
-    prompt += "- carpetTier is one of: 'budget', 'mid', 'premium'\n";
+    prompt += "- rooms is an array of areas/zones. Each entry has: type ('room' or 'stairs' or other relevant area type), name (string), and relevant measurements (length/width in metres for floor areas, steps for staircases, qty for counted items)\n";
+    prompt += "- Include boolean flags relevant to the trade (e.g. uplift for removal of old materials, doors for transition bars)\n";
+    prompt += "- carpetTier (or equivalent material grade) is one of: 'budget', 'mid', 'premium'. Use this field for any tiered material choice.\n";
     prompt += "- customer is the customer name string\n";
     prompt += "- Only output the JSON block once you have confirmed all details with the user\n";
+    prompt += "- Adapt your questions to be relevant to " + professionName + " - do not ask about carpet if the user is not a carpet fitter\n";
 
     return prompt;
   }
