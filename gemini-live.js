@@ -16,11 +16,26 @@
   let streaming = false;
   let setupAcked = false;
 
+  /* ---------- retry & timeout state ---------- */
+  let retryCount = 0;
+  let retryTimer = null;
+  let lastApiKey = null;
+  let lastSystemPrompt = null;
+  let responseTimer = null;
+  let thinkingTimer = null;
+  let userStoppedSpeaking = false;
+
+  var MAX_RETRIES = 3;
+  var THINKING_TIMEOUT = 15000;  // 15 seconds
+  var DISCONNECT_TIMEOUT = 30000; // 30 seconds
+
   /* ---------- callbacks (set by consumer) ---------- */
   let onJobComplete = null;   // function(jobJSON)
   let onTextResponse = null;  // function(text) - any text part from model
+  let onTurnComplete = null;  // function(fullText) - full text when turn completes
   let onStateChange = null;   // function(state: 'connecting'|'connected'|'disconnected')
   let onError = null;         // function(errMsg)
+  let onThinking = null;      // function() - called when waiting too long for response
 
   /* ---------- constants ---------- */
   const INPUT_SAMPLE_RATE = 16000;
@@ -39,6 +54,9 @@
    * @returns {Promise<void>} resolves when setup is acknowledged
    */
   function connect(apiKey, systemPrompt) {
+    lastApiKey = apiKey;
+    lastSystemPrompt = systemPrompt;
+
     return new Promise(function (resolve, reject) {
       if (connected) { resolve(); return; }
 
@@ -72,11 +90,13 @@
       };
 
       ws.onmessage = function (event) {
+        resetResponseTimeout();
         handleMessage(event.data);
         // First message after setup is the ack
         if (!setupAcked) {
           setupAcked = true;
           connected = true;
+          retryCount = 0; // Reset retries on successful connection
           fireState("connected");
           resolve();
         }
@@ -84,6 +104,10 @@
 
       ws.onerror = function (err) {
         var msg = "WebSocket error connecting to Gemini";
+        // Check for auth/key issues (code 401/403 typically cause immediate close)
+        if (!setupAcked) {
+          msg = "Connection failed - check your API key";
+        }
         if (onError) onError(msg);
         reject(new Error(msg));
       };
@@ -92,12 +116,81 @@
         var wasConnected = connected;
         connected = false;
         streaming = false;
-        fireState("disconnected");
+        clearTimeouts();
+
         if (!setupAcked) {
-          reject(new Error("Connection closed before setup completed (code: " + event.code + ")"));
+          // Connection failed before setup - could be invalid key
+          var errMsg = event.code === 1008 || event.code === 4003 || event.code === 403
+            ? "Invalid API key"
+            : "Connection closed before setup completed (code: " + event.code + ")";
+          fireState("disconnected");
+          reject(new Error(errMsg));
+          return;
+        }
+
+        // If was connected and we haven't exceeded retries, attempt reconnect
+        if (wasConnected && retryCount < MAX_RETRIES) {
+          attemptRetry();
+        } else {
+          fireState("disconnected");
         }
       };
     });
+  }
+
+  /**
+   * Attempt to reconnect with exponential backoff.
+   */
+  function attemptRetry() {
+    retryCount++;
+    var delay = Math.min(1000 * Math.pow(2, retryCount - 1), 8000); // 1s, 2s, 4s (max 8s)
+    fireState("connecting");
+    if (onError) onError("Connection lost. Reconnecting (attempt " + retryCount + "/" + MAX_RETRIES + ")...");
+
+    retryTimer = setTimeout(function () {
+      if (!lastApiKey || !lastSystemPrompt) {
+        fireState("disconnected");
+        return;
+      }
+      connect(lastApiKey, lastSystemPrompt)
+        .then(function () {
+          // Restart streaming if it was active
+          if (streaming || micStream) {
+            return startStreaming();
+          }
+        })
+        .catch(function (err) {
+          if (retryCount >= MAX_RETRIES) {
+            if (onError) onError("Connection failed after " + MAX_RETRIES + " attempts. Falling back to basic voice.");
+            fireState("disconnected");
+          }
+        });
+    }, delay);
+  }
+
+  /**
+   * Reset and start the response timeout timers.
+   */
+  function resetResponseTimeout() {
+    clearTimeouts();
+  }
+
+  function startResponseTimeout() {
+    clearTimeouts();
+    thinkingTimer = setTimeout(function () {
+      if (onThinking) onThinking();
+    }, THINKING_TIMEOUT);
+
+    responseTimer = setTimeout(function () {
+      if (onError) onError("No response from AI after 30 seconds. Disconnecting.");
+      disconnect();
+    }, DISCONNECT_TIMEOUT);
+  }
+
+  function clearTimeouts() {
+    if (thinkingTimer) { clearTimeout(thinkingTimer); thinkingTimer = null; }
+    if (responseTimer) { clearTimeout(responseTimer); responseTimer = null; }
+    if (retryTimer) { clearTimeout(retryTimer); retryTimer = null; }
   }
 
   /**
@@ -105,6 +198,8 @@
    */
   function disconnect() {
     stopStreaming();
+    clearTimeouts();
+    retryCount = MAX_RETRIES; // Prevent auto-retry after explicit disconnect
     if (ws) {
       try { ws.close(); } catch (e) {}
       ws = null;
@@ -146,6 +241,8 @@
             }
           };
           ws.send(JSON.stringify(msg));
+          // Start response timeout as user is sending audio
+          startResponseTimeout();
         };
 
         sourceNode.connect(scriptNode);
@@ -202,10 +299,15 @@
 
     // Turn complete - process accumulated text
     if (sc.turnComplete) {
+      clearTimeouts();
       if (pendingText) {
+        // Fire turn complete callback with the full accumulated text
+        if (onTurnComplete) onTurnComplete(pendingText);
         processTextResponse(pendingText);
         pendingText = "";
       }
+      // Start timeout for next response (user may speak again)
+      startResponseTimeout();
       return;
     }
 
@@ -216,6 +318,7 @@
     mt.parts.forEach(function (part) {
       // Audio part - play it
       if (part.inlineData && part.inlineData.data) {
+        clearTimeouts(); // We are receiving audio, so no timeout needed
         playAudioChunk(part.inlineData.data, part.inlineData.mimeType || "audio/pcm;rate=24000");
       }
       // Text part - accumulate
@@ -354,10 +457,14 @@
     get onJobComplete() { return onJobComplete; },
     set onTextResponse(fn) { onTextResponse = fn; },
     get onTextResponse() { return onTextResponse; },
+    set onTurnComplete(fn) { onTurnComplete = fn; },
+    get onTurnComplete() { return onTurnComplete; },
     set onStateChange(fn) { onStateChange = fn; },
     get onStateChange() { return onStateChange; },
     set onError(fn) { onError = fn; },
-    get onError() { return onError; }
+    get onError() { return onError; },
+    set onThinking(fn) { onThinking = fn; },
+    get onThinking() { return onThinking; }
   };
 
 })();

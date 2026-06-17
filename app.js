@@ -163,6 +163,15 @@
     return prompt;
   }
 
+  function geminiStatusBubble(text) {
+    const d = document.createElement("div");
+    d.className = "bubble bubble--status";
+    d.textContent = text;
+    chat.appendChild(d);
+    chat.scrollTop = chat.scrollHeight;
+    return d;
+  }
+
   function startGeminiSession() {
     if (geminiSessionActive) return;
     const apiKey = localStorage.getItem("cq_gemini_key");
@@ -171,23 +180,51 @@
     geminiSessionActive = true;
     const micBtn = $("#capture-mic");
     micBtn.classList.add("is-live", "gemini-active");
-    bubble("AI voice active - speak naturally", "bot");
+
+    // Connection status indicator
+    var statusEl = geminiStatusBubble("Connecting to AI...");
 
     const systemPrompt = buildGeminiSystemPrompt();
 
     GeminiLive.onStateChange = function (state) {
-      if (state === "disconnected" && geminiSessionActive) {
+      if (state === "connected") {
+        statusEl.textContent = "AI listening";
+        statusEl.classList.add("status--connected");
+        statusEl.classList.remove("status--error");
+      } else if (state === "connecting") {
+        statusEl.textContent = "Connecting to AI...";
+        statusEl.classList.remove("status--connected", "status--error");
+      } else if (state === "disconnected" && geminiSessionActive) {
         stopGeminiSession();
       }
     };
 
     GeminiLive.onError = function (msg) {
-      bubble("Connection error: " + escapeHtml(msg), "bot");
-      stopGeminiSession();
+      toast(msg);
+      // If it looks like an API key issue, update the status and fall back
+      if (/api key|invalid|auth/i.test(msg)) {
+        statusEl.textContent = "Connection failed - using basic voice";
+        statusEl.classList.add("status--error");
+        statusEl.classList.remove("status--connected");
+        stopGeminiSession(true); // graceful fallback
+      }
+    };
+
+    GeminiLive.onThinking = function () {
+      botSay("Still thinking...", true);
+    };
+
+    GeminiLive.onTurnComplete = function (fullText) {
+      // Show the full turn text as a chat bubble (mute since Gemini speaks via audio)
+      // Strip any JSON code blocks from display text
+      var displayText = fullText.replace(/```json[\s\S]*?```/g, "").trim();
+      if (displayText) {
+        botSay(escapeHtml(displayText), true);
+      }
     };
 
     GeminiLive.onTextResponse = function (text) {
-      // We can optionally show partial text in a bubble
+      // Streaming text arrives here piece by piece - we use onTurnComplete for display
     };
 
     GeminiLive.onJobComplete = function (jobData) {
@@ -215,24 +252,65 @@
 
     GeminiLive.connect(apiKey, systemPrompt)
       .then(function () {
+        // Show intro help message
+        botSay("Connected to AI assistant. Speak naturally about the job - rooms, sizes, carpet type. I will build your quote when I have everything.", true);
         return GeminiLive.startStreaming();
       })
       .then(function () {
         // Streaming started successfully
       })
       .catch(function (err) {
-        bubble("Could not start AI voice: " + escapeHtml(err.message || "Unknown error"), "bot");
-        stopGeminiSession();
+        var errMsg = err.message || "Unknown error";
+        // Check if API key issue
+        if (/api key|invalid|auth|closed before setup/i.test(errMsg)) {
+          statusEl.textContent = "Connection failed - using basic voice";
+          statusEl.classList.add("status--error");
+          toast("AI connection failed. Check your API key in Settings.");
+        } else {
+          statusEl.textContent = "Connection failed - using basic voice";
+          statusEl.classList.add("status--error");
+          toast("Could not start AI voice: " + errMsg);
+        }
+        stopGeminiSession(true); // graceful fallback to browser STT
       });
   }
 
-  function stopGeminiSession() {
+  function stopGeminiSession(fallbackToBrowserSTT) {
     if (!geminiSessionActive) return;
     geminiSessionActive = false;
     GeminiLive.disconnect();
     const micBtn = $("#capture-mic");
     micBtn.classList.remove("is-live", "gemini-active");
-    bubble("AI voice ended", "bot");
+
+    if (!fallbackToBrowserSTT) {
+      bubble("AI voice ended", "bot");
+    }
+
+    // Handle partial job data: if we have some rooms but are missing info, use the queue system
+    if (job && job.rooms && job.rooms.length > 0 && mode !== "done") {
+      // We have partial data from Gemini - check for gaps
+      var hasMissing = false;
+      job.rooms.forEach(function (r) {
+        if (r.type === "room" && (!r.length || !r.width)) hasMissing = true;
+        if (r.type === "stairs" && r.steps == null) hasMissing = true;
+      });
+      if (!job.carpetTier) hasMissing = true;
+
+      if (hasMissing) {
+        botSay("I have some details from our conversation. Let me fill in what is missing.", true);
+        mode = "await_job"; // Reset so buildQueue works properly
+        jobCardBubble(job);
+        $("#capture-build").disabled = false;
+        buildQueue();
+        askNext();
+        return;
+      }
+    }
+
+    // If fallback was requested and no job data yet, hint the user can type or use basic voice
+    if (fallbackToBrowserSTT && (!job || !job.rooms || job.rooms.length === 0)) {
+      botSay("You can use the mic for basic voice input, or type your job details below.", true);
+    }
   }
 
   /* ============================================================
