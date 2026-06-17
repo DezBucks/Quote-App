@@ -69,7 +69,7 @@ export default {
 
     // Proxy: client -> Gemini
     server.addEventListener("message", (event) => {
-      if (!geminiClosed && geminiWs.readyState === WebSocket.READY_STATE_OPEN) {
+      if (!geminiClosed) {
         try {
           geminiWs.send(event.data);
         } catch (e) {
